@@ -28,10 +28,10 @@ Let's get started!
 
 #@title Watch the video tutorial
 
-from IPython.display import YouTubeVideo
-YouTubeVideo('8N-nM3QW7O0', width=720, height=420)
+# from IPython.display import YouTubeVideo
+# YouTubeVideo('8N-nM3QW7O0', width=720, height=420)
 
-!nvidia-smi
+# !nvidia-smi
 
 """## What is BERT?
 
@@ -76,9 +76,9 @@ The best part is that you can do Transfer Learning (thanks to the ideas from Ope
 We'll need [the Transformers library](https://huggingface.co/transformers/) by Hugging Face:
 """
 
-!pip install -q -U watermark
+# !pip install -q -U watermark
 
-!pip install -qq transformers
+# !pip install -qq transformers
 
 # Commented out IPython magic to ensure Python compatibility.
 # %reload_ext watermark
@@ -100,10 +100,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report
 from collections import defaultdict
 from textwrap import wrap
-
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1, 2, 3"
 
 # %matplotlib inline
 # %config InlineBackend.figure_format='retina'
@@ -120,49 +121,56 @@ RANDOM_SEED = 42
 np.random.seed(RANDOM_SEED)
 torch.manual_seed(RANDOM_SEED)
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-device
+device = torch.device("cuda:1,2,3" if torch.cuda.is_available() else "cpu")
+# device = "cpu"
+
+
 
 """## Data Exploration
 
 We'll load the Google Play app reviews dataset, that we've put together in the previous part:
 """
 
-!gdown --id 1S6qMioqPJjyBLpLVz4gmRTnJHnjitnuV
-!gdown --id 1zdmewp7ayS4js4VtrJEHzAheSW-5NBZv
+# !gdown --id 1S6qMioqPJjyBLpLVz4gmRTnJHnjitnuV
+# !gdown --id 1zdmewp7ayS4js4VtrJEHzAheSW-5NBZv
 
-df = pd.read_csv("reviews.csv")
-df.head()
+# df = pd.read_csv("test.csv")
+df = pd.read_csv("arxiv.cs.ai_2007-2017.csv")
 
-df.shape
+print(df.head())
+
+print(df.shape)
 
 """We have about 16k examples. Let's check for missing values:"""
 
-df.info()
+print(df.info())
 
 """Great, no missing values in the score and review texts! Do we have class imbalance?"""
 
-sns.countplot(df.score)
-plt.xlabel('review score');
+sns.countplot(x="Label", data=df)
+plt.xlabel('review score')
+plt.show()
+
 
 """That's hugely imbalanced, but it's okay. We're going to convert the dataset into negative, neutral and positive sentiment:"""
 
-def to_sentiment(rating):
-  rating = int(rating)
-  if rating <= 2:
-    return 0
-  elif rating == 3:
-    return 1
-  else: 
-    return 2
+# def to_sentiment(rating):
+#   rating = int(rating)
+#   if rating <= 2:
+#     return 0
+#   elif rating == 3:
+#     return 1
+#   else:
+#     return 2
+#
+# df['sentiment'] = df.score.apply(to_sentiment)
+#
+# class_names = ['negative', 'neutral', 'positive']
+class_names = ['reject', 'accept']
 
-df['sentiment'] = df.score.apply(to_sentiment)
-
-class_names = ['negative', 'neutral', 'positive']
-
-ax = sns.countplot(df.sentiment)
-plt.xlabel('review sentiment')
-ax.set_xticklabels(class_names);
+# ax = sns.countplot(df.sentiment)
+# plt.xlabel('review sentiment')
+# ax.set_xticklabels(class_names)
 
 """The balance was (mostly) restored.
 
@@ -205,19 +213,19 @@ print(f'Token IDs: {token_ids}')
 
 """
 
-tokenizer.sep_token, tokenizer.sep_token_id
+# tokenizer.sep_token, tokenizer.sep_token_id
 
 """`[CLS]` - we must add this token to the start of each sentence, so BERT knows we're doing classification"""
 
-tokenizer.cls_token, tokenizer.cls_token_id
+# tokenizer.cls_token, tokenizer.cls_token_id
 
 """There is also a special token for padding:"""
 
-tokenizer.pad_token, tokenizer.pad_token_id
+# tokenizer.pad_token, tokenizer.pad_token_id
 
 """BERT understands tokens that were in the training set. Everything else can be encoded using the `[UNK]` (unknown) token:"""
 
-tokenizer.unk_token, tokenizer.unk_token_id
+# tokenizer.unk_token, tokenizer.unk_token_id
 
 """All of that work can be done using the [`encode_plus()`](https://huggingface.co/transformers/main_classes/tokenizer.html#transformers.PreTrainedTokenizer.encode_plus) method:"""
 
@@ -226,22 +234,23 @@ encoding = tokenizer.encode_plus(
   max_length=32,
   add_special_tokens=True, # Add '[CLS]' and '[SEP]'
   return_token_type_ids=False,
-  pad_to_max_length=True,
+  padding='max_length',
+  # pad_to_max_length=True,
   return_attention_mask=True,
   return_tensors='pt',  # Return PyTorch tensors
 )
 
-encoding.keys()
+print(encoding.keys())
 
 """The token ids are now stored in a Tensor and padded to a length of 32:"""
 
 print(len(encoding['input_ids'][0]))
-encoding['input_ids'][0]
+# encoding['input_ids'][0]
 
 """The attention mask has the same length:"""
 
 print(len(encoding['attention_mask'][0]))
-encoding['attention_mask']
+# encoding['attention_mask']
 
 """We can inverse the tokenization to have a look at the special tokens:"""
 
@@ -254,24 +263,27 @@ BERT works with fixed-length sequences. We'll use a simple strategy to choose th
 
 token_lens = []
 
-for txt in df.content:
-  tokens = tokenizer.encode(txt, max_length=512)
+for i, txt in enumerate(df.Abstract):
+  tokens = tokenizer.encode(txt, truncation=True, max_length=1024)
+  if len(tokens) > 512:
+    df = df.drop(i)
   token_lens.append(len(tokens))
 
 """and plot the distribution:"""
 
-sns.distplot(token_lens)
-plt.xlim([0, 256]);
-plt.xlabel('Token count');
+sns.displot(token_lens)
+plt.xlim([0, 512])
+plt.xlabel('Token count')
+plt.show()
 
 """Most of the reviews seem to contain less than 128 tokens, but we'll be on the safe side and choose a maximum length of 160."""
 
-MAX_LEN = 160
+MAX_LEN = 512
 
 """We have all building blocks required to create a PyTorch dataset. Let's do it:"""
 
-class GPReviewDataset(Dataset):
 
+class GPReviewDataset(Dataset):
   def __init__(self, reviews, targets, tokenizer, max_len):
     self.reviews = reviews
     self.targets = targets
@@ -290,7 +302,8 @@ class GPReviewDataset(Dataset):
       add_special_tokens=True,
       max_length=self.max_len,
       return_token_type_ids=False,
-      pad_to_max_length=True,
+      padding='max_length',
+      # pad_to_max_length=True,
       return_attention_mask=True,
       return_tensors='pt',
     )
@@ -307,14 +320,15 @@ class GPReviewDataset(Dataset):
 df_train, df_test = train_test_split(df, test_size=0.1, random_state=RANDOM_SEED)
 df_val, df_test = train_test_split(df_test, test_size=0.5, random_state=RANDOM_SEED)
 
-df_train.shape, df_val.shape, df_test.shape
+print(df_train.shape, df_val.shape, df_test.shape)
 
 """We also need to create a couple of data loaders. Here's a helper function to do it:"""
 
+
 def create_data_loader(df, tokenizer, max_len, batch_size):
   ds = GPReviewDataset(
-    reviews=df.content.to_numpy(),
-    targets=df.sentiment.to_numpy(),
+    reviews=df.Abstract.to_numpy(),
+    targets=df.Label.to_numpy(),
     tokenizer=tokenizer,
     max_len=max_len
   )
@@ -322,7 +336,7 @@ def create_data_loader(df, tokenizer, max_len, batch_size):
   return DataLoader(
     ds,
     batch_size=batch_size,
-    num_workers=4
+    num_workers=0
   )
 
 BATCH_SIZE = 16
@@ -351,29 +365,34 @@ bert_model = BertModel.from_pretrained(PRE_TRAINED_MODEL_NAME)
 
 """And try to use it on the encoding of our sample text:"""
 
-last_hidden_state, pooled_output = bert_model(
-  input_ids=encoding['input_ids'], 
-  attention_mask=encoding['attention_mask']
-)
+input_ids = encoding['input_ids']
+attention_mask = encoding['attention_mask']
+a = bert_model(input_ids, attention_mask)
+last_hidden_state = a['last_hidden_state']
+pooled_output = a['pooler_output']
+
+# last_hidden_state, pooled_output = bert_model(
+#   input_ids=encoding['input_ids'],
+#   attention_mask=encoding['attention_mask']
+# )
 
 """The `last_hidden_state` is a sequence of hidden states of the last layer of the model. Obtaining the `pooled_output` is done by applying the [BertPooler](https://github.com/huggingface/transformers/blob/edf0582c0be87b60f94f41c659ea779876efc7be/src/transformers/modeling_bert.py#L426) on `last_hidden_state`:"""
 
-last_hidden_state.shape
+print(last_hidden_state.shape)
 
 """We have the hidden state for each of our 32 tokens (the length of our example sequence). But why 768? This is the number of hidden units in the feedforward-networks. We can verify that by checking the config:"""
 
-bert_model.config.hidden_size
+print(bert_model.config.hidden_size)
 
 """
 
 You can think of the `pooled_output` as a summary of the content, according to BERT. Albeit, you might try and do better. Let's look at the shape of the output:"""
 
-pooled_output.shape
+print(pooled_output.shape)
 
 """We can use all of this knowledge to create a classifier that uses the BERT model:"""
 
 class SentimentClassifier(nn.Module):
-
   def __init__(self, n_classes):
     super(SentimentClassifier, self).__init__()
     self.bert = BertModel.from_pretrained(PRE_TRAINED_MODEL_NAME)
@@ -381,10 +400,12 @@ class SentimentClassifier(nn.Module):
     self.out = nn.Linear(self.bert.config.hidden_size, n_classes)
   
   def forward(self, input_ids, attention_mask):
-    _, pooled_output = self.bert(
+    x = self.bert(
       input_ids=input_ids,
       attention_mask=attention_mask
     )
+
+    pooled_output = x['pooler_output']
     output = self.drop(pooled_output)
     return self.out(output)
 
@@ -405,8 +426,8 @@ print(input_ids.shape) # batch size x seq length
 print(attention_mask.shape) # batch size x seq length
 
 """To get the predicted probabilities from our trained model, we'll apply the softmax function to the outputs:"""
-
-F.softmax(model(input_ids, attention_mask), dim=1)
+b = model(input_ids, attention_mask)
+b = F.softmax(b, dim=1)
 
 """### Training
 
@@ -475,10 +496,12 @@ def train_epoch(
 
   return correct_predictions.double() / n_examples, np.mean(losses)
 
+
 """Training the model should look familiar, except for two things. The scheduler gets called every time a batch is fed to the model. We're avoiding exploding gradients by clipping the gradients of the model using [clip_grad_norm_](https://pytorch.org/docs/stable/nn.html#clip-grad-norm).
 
 Let's write another one that helps us evaluate the model on a given data loader:
 """
+
 
 def eval_model(model, data_loader, loss_fn, device, n_examples):
   model = model.eval()
@@ -510,45 +533,45 @@ def eval_model(model, data_loader, loss_fn, device, n_examples):
 # Commented out IPython magic to ensure Python compatibility.
 # %%time
 # 
-# history = defaultdict(list)
-# best_accuracy = 0
-# 
-# for epoch in range(EPOCHS):
-# 
-#   print(f'Epoch {epoch + 1}/{EPOCHS}')
-#   print('-' * 10)
-# 
-#   train_acc, train_loss = train_epoch(
-#     model,
-#     train_data_loader,    
-#     loss_fn, 
-#     optimizer, 
-#     device, 
-#     scheduler, 
-#     len(df_train)
-#   )
-# 
-#   print(f'Train loss {train_loss} accuracy {train_acc}')
-# 
-#   val_acc, val_loss = eval_model(
-#     model,
-#     val_data_loader,
-#     loss_fn, 
-#     device, 
-#     len(df_val)
-#   )
-# 
-#   print(f'Val   loss {val_loss} accuracy {val_acc}')
-#   print()
-# 
-#   history['train_acc'].append(train_acc)
-#   history['train_loss'].append(train_loss)
-#   history['val_acc'].append(val_acc)
-#   history['val_loss'].append(val_loss)
-# 
-#   if val_acc > best_accuracy:
-#     torch.save(model.state_dict(), 'best_model_state.bin')
-#     best_accuracy = val_acc
+history = defaultdict(list)
+best_accuracy = 0
+
+for epoch in range(EPOCHS):
+
+  print(f'Epoch {epoch + 1}/{EPOCHS}')
+  print('-' * 10)
+
+  train_acc, train_loss = train_epoch(
+    model,
+    train_data_loader,
+    loss_fn,
+    optimizer,
+    device,
+    scheduler,
+    len(df_train)
+  )
+
+  print(f'Train loss {train_loss} accuracy {train_acc}')
+
+  val_acc, val_loss = eval_model(
+    model,
+    val_data_loader,
+    loss_fn,
+    device,
+    len(df_val)
+  )
+
+  print(f'Val   loss {val_loss} accuracy {val_acc}')
+  print()
+
+  history['train_acc'].append(train_acc)
+  history['train_loss'].append(train_loss)
+  history['val_acc'].append(val_acc)
+  history['val_loss'].append(val_loss)
+
+  if val_acc > best_accuracy:
+    torch.save(model.state_dict(), 'best_model_state.bin')
+    best_accuracy = val_acc
 
 """Note that we're storing the state of the best model, indicated by the highest validation accuracy.
 
@@ -562,7 +585,8 @@ plt.title('Training history')
 plt.ylabel('Accuracy')
 plt.xlabel('Epoch')
 plt.legend()
-plt.ylim([0, 1]);
+plt.ylim([0, 1])
+plt.show()
 
 """The training accuracy starts to approach 100% after 10 epochs or so. You might try to fine-tune the parameters a bit more, but this will be good enough for us.
 
@@ -650,7 +674,8 @@ def show_confusion_matrix(confusion_matrix):
   hmap.yaxis.set_ticklabels(hmap.yaxis.get_ticklabels(), rotation=0, ha='right')
   hmap.xaxis.set_ticklabels(hmap.xaxis.get_ticklabels(), rotation=30, ha='right')
   plt.ylabel('True sentiment')
-  plt.xlabel('Predicted sentiment');
+  plt.xlabel('Predicted sentiment')
+  plt.show()
 
 cm = confusion_matrix(y_test, y_pred)
 df_cm = pd.DataFrame(cm, index=class_names, columns=class_names)
@@ -679,7 +704,8 @@ print(f'True sentiment: {class_names[true_sentiment]}')
 sns.barplot(x='values', y='class_names', data=pred_df, orient='h')
 plt.ylabel('sentiment')
 plt.xlabel('probability')
-plt.xlim([0, 1]);
+plt.xlim([0, 1])
+plt.show()
 
 """### Predicting on Raw Text
 
@@ -695,7 +721,8 @@ encoded_review = tokenizer.encode_plus(
   max_length=MAX_LEN,
   add_special_tokens=True,
   return_token_type_ids=False,
-  pad_to_max_length=True,
+  padding='max_length',
+  # pad_to_max_length=True,
   return_attention_mask=True,
   return_tensors='pt',
 )
