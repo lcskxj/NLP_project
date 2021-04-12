@@ -1,7 +1,6 @@
 import transformers
 from transformers import BertModel, BertTokenizer, AdamW, get_linear_schedule_with_warmup
 import torch
-
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -35,8 +34,9 @@ torch.manual_seed(RANDOM_SEED)
 device = torch.device("cuda:1,2,3" if torch.cuda.is_available() else "cpu")
 
 # load data
-# df = pd.read_csv("test.csv")
-df = pd.read_csv("arxiv.cs.ai_2007-2017.csv")
+# df = pd.read_csv("data/test.csv")
+print("Loading Data......")
+df = pd.read_csv("data/arxiv.cs.ai_2007-2017.csv")
 class_names = ['reject', 'accept']
 
 # show the distribution of data
@@ -72,6 +72,7 @@ MAX_LEN = 512
 # data processing
 df_train, df_test = train_test_split(df, test_size=0.1, random_state=RANDOM_SEED)
 df_val, df_test = train_test_split(df_test, test_size=0.5, random_state=RANDOM_SEED)
+print("The size of training data, validation data and test data:")
 print(df_train.shape, df_val.shape, df_test.shape)
 
 
@@ -148,12 +149,12 @@ class RateClassifier(nn.Module):
         return self.out(output)
 
 
+print("Build model......")
 model = RateClassifier(len(class_names))
 model = model.to(device)
 
 # training setting
 EPOCHS = 10
-
 optimizer = AdamW(model.parameters(), lr=2e-5, correct_bias=False)
 total_steps = len(train_data_loader) * EPOCHS
 scheduler = get_linear_schedule_with_warmup(
@@ -213,6 +214,7 @@ def eval_model(model, data_loader, loss_fn, device, n_examples):
 
 
 # training
+print("Start training......")
 history = defaultdict(list)
 best_accuracy = 0
 
