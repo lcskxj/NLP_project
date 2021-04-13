@@ -36,7 +36,7 @@ device = torch.device("cuda:1,2,3" if torch.cuda.is_available() else "cpu")
 # load data
 # df = pd.read_csv("data/test.csv")
 print("Loading Data......")
-df = pd.read_csv("data/arxiv.cs.ai_2007-2017.csv")
+df = pd.read_csv("../data/arxiv.cs.ai_2007-2017.csv")
 class_names = ['reject', 'accept']
 
 # show the distribution of data
