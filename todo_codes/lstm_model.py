@@ -1,23 +1,23 @@
-import transformers
+import re
 from transformers import BertModel, BertTokenizer, AdamW, get_linear_schedule_with_warmup
 import torch
 import numpy as np
 import pandas as pd
+from torch import nn
 import seaborn as sns
 from pylab import rcParams
 import matplotlib.pyplot as plt
-from matplotlib import rc
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix, classification_report
 from collections import defaultdict
-from textwrap import wrap
-from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
-import torch.nn.functional as F
+
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "1, 2, 3"
 
 BATCH_SIZE = 8
+# pattern = r',|\.|/|;|\'|`|\[|\]|<|>|\?|:|"|\{|\}|\~|!|@|#|\$|%|\^|&|\(|\)|-|=|\_|\+|，|。|、|；|‘|’|【|】|·|！| |…|（|）'
+pattern = r'\.|\?|!'
+
 
 # plot setting
 sns.set(style='whitegrid', palette='muted', font_scale=1.2)
@@ -36,7 +36,7 @@ device = torch.device("cuda:1,2,3" if torch.cuda.is_available() else "cpu")
 # load data
 # df = pd.read_csv("data/test.csv")
 print("Loading Data......")
-df = pd.read_csv("../data/arxiv.cs.ai_2007-2017.csv")
+df = pd.read_csv("data/arxiv.cs.ai_2007-2017.csv")
 class_names = ['reject', 'accept']
 
 # show the distribution of data
@@ -44,6 +44,25 @@ sns.countplot(x="Label", data=df)
 plt.xlabel('review score')
 plt.show()
 plt.savefig("data_distribution.png")
+
+df_temp = pd.DataFrame(columns=('Abstract', 'Label'))
+
+
+count = 0
+for index, row in df.iterrows():
+    if row['Label'] == 1:
+        df_temp = df_temp.append(row, ignore_index=True)
+    elif count < 500:
+        df_temp = df_temp.append(row, ignore_index=True)
+        count += 1
+
+sns.countplot(x="Label", data=df_temp)
+plt.xlabel('review score')
+plt.show()
+plt.savefig("data_distribution.png")
+
+
+df = df_temp
 
 # pretrained bert model
 PRE_TRAINED_MODEL_NAME = 'bert-base-cased'
@@ -53,21 +72,33 @@ tokenizer = BertTokenizer.from_pretrained(PRE_TRAINED_MODEL_NAME)
 
 # data processing ---- get the max length
 token_lens = []
+sequence_lens = []
 for i, txt in enumerate(df.Abstract):
-  tokens = tokenizer.encode(txt, truncation=True, max_length=1024)
-  if len(tokens) > 512:
-    df = df.drop(i)
-  token_lens.append(len(tokens))
+    # result_list = txt.split(".")
+    result_list = re.split(pattern, txt)
+    for r in result_list:
+        tokens = tokenizer.encode(r, truncation=True, max_length=1024)
+        token_lens.append(len(tokens))
+    sequence_lens.append(len(result_list))
+    df.loc[i, 'Abstract'] = result_list
 
 # plot the distribution
+print(max(token_lens))
 sns.displot(token_lens)
-plt.xlim([0, 512])
+plt.xlim([0, 140])
 plt.xlabel('Token count')
 plt.show()
 plt.savefig("data_length_distribution.png")
 
+print(max(sequence_lens))
+sns.displot(sequence_lens)
+plt.xlim([0, 30])
+plt.xlabel('Sequence count')
+plt.show()
+plt.savefig("sequence_length_distribution.png")
+
 # set the max length
-MAX_LEN = 512
+MAX_LEN = 186
 
 # data processing
 df_train, df_test = train_test_split(df, test_size=0.1, random_state=RANDOM_SEED)
@@ -88,41 +119,42 @@ class GenDataset(Dataset):
         return len(self.reviews)
 
     def __getitem__(self, item):
-        review = str(self.reviews[item])
+        review = self.reviews[item]
         target = self.targets[item]
+        for i, r in enumerate(review):
+            encoding = self.tokenizer.encode_plus(r, add_special_tokens=True, max_length=self.max_len, return_token_type_ids=False,
+            padding='max_length', return_attention_mask=True, return_tensors='pt')
+            if i == 0:
+                e = encoding['input_ids']
+                a = encoding['attention_mask']
+            else:
+                e = torch.cat((e, encoding['input_ids']), 0)
+                a = torch.cat((a, encoding['attention_mask']), 0)
 
-        encoding = self.tokenizer.encode_plus(
-            review,
-            add_special_tokens=True,
-            max_length=self.max_len,
-            return_token_type_ids=False,
-            padding='max_length',
-            # pad_to_max_length=True,
-            return_attention_mask=True,
-            return_tensors='pt',
-        )
-
+        while e.shape[0] < 30:
+            temp = torch.zeros((1, self.max_len), dtype=torch.long)
+            e = torch.cat((e, temp), 0)
+            a = torch.cat((a, temp), 0)
+        # print("ok")
         return {
             'review_text': review,
-            'input_ids': encoding['input_ids'].flatten(),
-            'attention_mask': encoding['attention_mask'].flatten(),
+            'input_ids': e,
+            'attention_mask': a,
             'targets': torch.tensor(target, dtype=torch.long)
         }
 
 
 def create_data_loader(df, tokenizer, max_len, batch_size):
-  ds = GenDataset(
+    ds = GenDataset(
     reviews=df.Abstract.to_numpy(),
     targets=df.Label.to_numpy(),
     tokenizer=tokenizer,
-    max_len=max_len
-  )
+    max_len=max_len)
 
-  return DataLoader(
+    return DataLoader(
     ds,
     batch_size=batch_size,
-    num_workers=0
-  )
+    num_workers=0)
 
 
 train_data_loader = create_data_loader(df_train, tokenizer, MAX_LEN, BATCH_SIZE)
@@ -130,6 +162,7 @@ val_data_loader = create_data_loader(df_val, tokenizer, MAX_LEN, BATCH_SIZE)
 test_data_loader = create_data_loader(df_test, tokenizer, MAX_LEN, BATCH_SIZE)
 
 
+# TODO add lstm layer
 # creat a classifier using bert model
 class RateClassifier(nn.Module):
     def __init__(self, n_classes):
@@ -137,13 +170,23 @@ class RateClassifier(nn.Module):
         self.bert = BertModel.from_pretrained(PRE_TRAINED_MODEL_NAME)
         self.drop = nn.Dropout(p=0.3)
         self.out = nn.Linear(self.bert.config.hidden_size, n_classes)
+        self.lstm = nn.LSTM(MAX_LEN, 2, bidirectional=True)
 
     def forward(self, input_ids, attention_mask):
+        # TODO input_ids:batch_size, 30, 186
+
+        # batch_size = input_ids.shape[0]
+        # input_ids = input_ids.permute(1, 0, 2).float()
+        # input_ids, _ = self.lstm(input_ids)
+        # input_ids = input_ids.reshape(batch_size, -1).long()
+        # attention_mask = attention_mask.permute(1, 0, 2).float()
+        # attention_mask, _ = self.lstm(attention_mask)
+        # attention_mask = attention_mask.reshape(batch_size, -1).long()
+
         x = self.bert(
             input_ids=input_ids,
             attention_mask=attention_mask
         )
-
         pooled_output = x['pooler_output']
         output = self.drop(pooled_output)
         return self.out(output)
@@ -236,7 +279,7 @@ for epoch in range(EPOCHS):
     history['val_loss'].append(val_loss)
 
     if val_acc > best_accuracy:
-        torch.save(model.state_dict(), 'bert_model.bin')
+        torch.save(model.state_dict(), 'bert_origin.bin')
         best_accuracy = val_acc
 
 # plot training vs validation accuracy
@@ -253,7 +296,7 @@ plt.savefig("data_accuracy.png")
 
 # test best model
 model = RateClassifier(len(class_names))
-model.load_state_dict(torch.load('bert_model.bin'))
+model.load_state_dict(torch.load('bert_origin.bin'))
 model = model.to(device)
 test_acc, _ = eval_model(model, test_data_loader, loss_fn, device, len(df_test))
 print("The accuracy of best model:", test_acc.item())
