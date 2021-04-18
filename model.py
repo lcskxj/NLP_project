@@ -20,9 +20,9 @@ class CNNClassifier(nn.Module):
         self.conv1 = nn.Conv2d(1, out_channels, kernel_size=(filter_width[0], self.bert.config.hidden_size))
         self.conv2 = nn.Conv2d(1, out_channels, kernel_size=(filter_width[1], self.bert.config.hidden_size))
         self.conv3 = nn.Conv2d(1, out_channels, kernel_size=(filter_width[2], self.bert.config.hidden_size))
-        self.out = nn.Linear(3 * out_channels, n_classes)
+        self.out = nn.Linear(3 * out_channels + 12, n_classes)
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, scores):
         input_ids = input_ids.view((-1, MAX_SENTENCE_LENGTH))
         attention_mask = attention_mask.view((-1, MAX_SENTENCE_LENGTH))
         x = self.bert(
@@ -43,6 +43,7 @@ class CNNClassifier(nn.Module):
         pooled3 = F.max_pool1d(F.relu(conv3), conv3.shape[-1])
 
         cat = self.drop(torch.cat((pooled1, pooled2, pooled3), dim=1)).squeeze(dim=-1)
+        cat = torch.cat([cat, scores], dim=1)
 
         return self.out(cat)
 
