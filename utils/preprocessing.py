@@ -4,6 +4,7 @@ import torch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 from transformers import BertTokenizer
+from text_scoring import get_score
 
 MAX_LENGTH = 15
 MAX_TOKEN_LENGTH = 512
@@ -37,10 +38,11 @@ def get_datasets(df):
 
 
 class AbstractReviewDataset(Dataset):
-    def __init__(self, abstracts, targets):
+    def __init__(self, abstracts, targets, scores):
         self.abstract = abstracts
         self.targets = targets
         self.tokenizer = tokenizer
+        self.scores = scores
 
     def __len__(self):
         return len(self.abstract)
@@ -48,6 +50,7 @@ class AbstractReviewDataset(Dataset):
     def __getitem__(self, item):
         abstract = self.abstract[item]
         target = self.targets[item]
+        score = self.scores[item]
         input_ids = []
         attention_masks = []
         for txt in abstract:
@@ -73,6 +76,7 @@ class AbstractReviewDataset(Dataset):
         attention_masks = torch.cat(attention_masks, dim=0)
 
         return {
+            'score': torch.tensor(score),
             'input_ids': input_ids,
             'attention_mask': attention_masks,
             'targets': torch.tensor(target, dtype=torch.long)
@@ -81,9 +85,13 @@ class AbstractReviewDataset(Dataset):
 
 def create_data_loader(df, batch_size):
     splited = split(df)
+    scores = []
+    for txt in df.Abstract:
+        scores.append(get_score(txt))
     ds = AbstractReviewDataset(
         abstracts=splited,
-        targets=df.Label.to_numpy()
+        targets=df.Label.to_numpy(),
+        scores=scores
     )
 
     return DataLoader(

@@ -30,10 +30,12 @@ def train_epoch(model, data_loader, loss_fn, optimizer, device, scheduler, n_exa
         input_ids = d["input_ids"].to(device)
         attention_mask = d["attention_mask"].to(device)
         targets = d["targets"].to(device)
+        scores = d['score'].to(device)
 
         outputs = model(
             input_ids=input_ids,
-            attention_mask=attention_mask
+            attention_mask=attention_mask,
+            scores=scores
         )
 
         _, preds = torch.max(outputs, dim=1)
@@ -62,10 +64,12 @@ def eval_model(trained_model, data_loader, loss_fn, device, n_examples):
             input_ids = d["input_ids"].to(device)
             attention_mask = d["attention_mask"].to(device)
             targets = d["targets"].to(device)
+            scores = d['score'].to(device)
 
             outputs = trained_model(
                 input_ids=input_ids,
-                attention_mask=attention_mask
+                attention_mask=attention_mask,
+                scores=scores
             )
             _, preds = torch.max(outputs, dim=1)
 
@@ -142,13 +146,13 @@ def train(total_epoch=10):
 
 
 if __name__ == '__main__':
-    df = pd.read_csv("./data/balance_data.csv")
+    df = pd.read_csv("arxiv.cs.ai_2007-2017.csv")
     trim(df)
     df_train, df_val, df_test = get_datasets(df)
     train_data_loader = create_data_loader(df_train, BATCH_SIZE)
     val_data_loader = create_data_loader(df_val, BATCH_SIZE)
     test_data_loader = create_data_loader(df_test, BATCH_SIZE)
-    # model = CNNClassifier(2)
-    model = RNNClassifier(2)
+    model = CNNClassifier(2)
+    # model = RNNClassifier(2)
     model.to(DEVICE)
     train()
